@@ -1,0 +1,41 @@
+1. nis.ldif has some limitations:
+a) posixGroup is structural, cannot combine with groupOfNames
+b) groupOfNames must have member attribute
+c) we use rfc2307bis.ldif instead, groupOfMembers can be used with posixGroup
+
+2. memberOf overlay
+
+3. VMs should have sssd,authconfig pre-installed
+a) ldapserver must use fqdn, and make dns resolution working without public traffic (e.g. add A record in tenant VPC using Route 53 aws cloud service)
+authconfig --enableldap --enableldapauth --enableldaptls --ldapserver="ldaps://ip-10-65-13-44.cn-northwest-1.compute.internal:1636" --ldapbasedn="dc=test1,dc=kailing,dc=cn" --enablefaillock --enablemkhomedir --update
+b) valid CAs must put in openldap default path /etc/openldap/cacerts (ideally we should put certificates in a known network location)
+certutil -A -d /etc/openldap/cacerts -n 'OpenLDAP Server' -t c -a  <<EOF
+-----BEGIN CERTIFICATE-----
+MIICSzCCAbSgAwIBAgIFALtOhEIwDQYJKoZIhvcNAQELBQAwOTE3MDUGA1UEAxMu
+aXAtMTAtNjUtMTMtNDQuY24tbm9ydGh3ZXN0LTEuY29tcHV0ZS5pbnRlcm5hbDAe
+Fw0yMjAzMTgwMTMzMjZaFw0yMzAzMTgwMTMzMjZaMDkxNzA1BgNVBAMTLmlwLTEw
+LTY1LTEzLTQ0LmNuLW5vcnRod2VzdC0xLmNvbXB1dGUuaW50ZXJuYWwwgZ8wDQYJ
+KoZIhvcNAQEBBQADgY0AMIGJAoGBALak/DzCOOVjXEPAXWbMtTeHzSMzyqNlhTk/
+4w8lTQBh7tIZZnb8rbuX/WvRqzR0cXxhJawzj4OqAGw76uc0+lTuxiBfGnFFojHe
+mpz7nU7V60m8/k78oR3oTl/qxGaQ1GAgjsAUWldJxk8fLXX0LBqJkJ/VijCJJkRu
+5c0Dlb9JAgMBAAGjXzBdMFsGA1UdEQRUMFKCLmlwLTEwLTY1LTEzLTQ0LmNuLW5v
+cnRod2VzdC0xLmNvbXB1dGUuaW50ZXJuYWyCCWxvY2FsaG9zdIIVbG9jYWxob3N0
+LmxvY2FsZG9tYWluMA0GCSqGSIb3DQEBCwUAA4GBALWnNy1aLsOmy5N+3s42D4kl
+rNLUXhd8Xppdw6wKrrRQ3Y3JVSu1D1IlfbdFDdPpG1k6brkAkoL9pyKtVm2Xa+ex
+6RTOohHQoHsPjfB40XVpPhxEwpSZTY05dR2yMJ8IOmAn5W1xwDEQJgE2yZ8ViwZO
+fURv8EOjhD39ci1aun7X
+-----END CERTIFICATE-----
+EOF
+c) sssd should be configured so that only members are authorized to login
+sed -i "/\[domain\/default\]/a \
+access_provider = ldap\n\
+ldap_access_order = filter\n\
+ldap_access_filter = (memberOf=cn=${project},ou=Groups,dc=${company},dc=kailing,dc=cn)" /etc/sssd/sssd.conf
+d) ACL should be added in openldap server, so directory informations are only searchable in current company subnet
+dn: olcDatabase={2}mdb,cn=config
+changetype: modify
+add: olcAccess
+olcAccess: to dn.subtree="${COMPANY_DN}" by peername.ip=${COMPANY_IP}%${COMPANY_NETMASK} read
+
+4. just a note:
+ldapsearch -Y EXTERNAL -H ldapi:/// use local unix socket, in other situations, we use root_dn
